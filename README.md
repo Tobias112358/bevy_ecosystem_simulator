@@ -1,0 +1,1 @@
+This is a copy of the simulation built in [this video](https://www.youtube.com/watch?v=r_It_X7v-1E), written in bevy.
