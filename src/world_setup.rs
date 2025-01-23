@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{ecs::world, prelude::*};
 use noise::{NoiseFn, Perlin};
 
 #[derive(Component)]
@@ -15,13 +15,25 @@ pub struct Foliage;
 
 
 #[derive(Event)]
-pub struct VoxelsSpawnedEvent;
+pub struct VoxelsSpawnedEvent(Vec<Vec<Entity>>);
+
+
+#[derive(Event)]
+pub struct WorldMapDataSetEvent;
+
+#[derive(Component)]
+pub struct WorldMap{
+    pub map: Vec<Vec<Entity>>,
+    pub width: usize,
+    pub height: usize,
+}
 
 pub(super) fn plugin(app: &mut App) {
     app
         .add_event::<VoxelsSpawnedEvent>()
+        .add_event::<WorldMapDataSetEvent>()
         .add_systems(Startup, spawn_world)
-        .add_systems(Update, generate_foliage);
+        .add_systems(Update, (generate_foliage, set_world_map));
 }
 
 
@@ -42,13 +54,7 @@ pub fn spawn_world(
         })
     );
 
-    //Spawn World base.
-    commands.spawn((
-                world_mesh,
-                world_mesh_mat,
-                Transform::from_translation(Vec3::new(0.0, -5.0, 0.0)),
-        )
-    );
+
 
     commands.spawn((
         PointLight {
@@ -60,6 +66,19 @@ pub fn spawn_world(
         },
         Transform::from_translation(Vec3::new(0.0, 10.0, 0.0)),
     ));
+
+    //Spawn World base.
+    let mut world = commands.spawn((
+            WorldMap {
+                map: Vec::new(),
+                width: 60,
+                height: 60,
+            },
+            //world_mesh,
+            //world_mesh_mat,
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+        )
+    );
 
 
     let voxel = meshes.add(Cuboid {
@@ -84,38 +103,64 @@ pub fn spawn_world(
 
     let perlin = Perlin::new(5593487);
 
-    //Spawn a bunch of cubes.
-    for i in -30..30 {
-        for j in -30..30 {
-            
-            let p_value = perlin.get([(i as f64 + 30.)/10. , (j as f64 + 30.)/10. ]);
+    let mut world_voxels: Vec<Vec<Entity>> = Vec::new();
 
-            if p_value < 0.0 {
-                commands.spawn((
-                    WaterVoxel,
-                    Mesh3d(voxel.clone()),
-                    MeshMaterial3d(water_voxel_mat.clone()),
-                    Transform::from_translation(Vec3::new(i as f32, -1., j as f32)),
-                ));
-            } else if p_value >= 0.0 && p_value < 0.15 {
-                commands.spawn((
-                    SandVoxel,
-                    Mesh3d(voxel.clone()),
-                    MeshMaterial3d(sand_voxel_mat.clone()),
-                    Transform::from_translation(Vec3::new(i as f32, -0.85, j as f32)),
-                ));
-            } else {
-                commands.spawn((
-                    GrassVoxel,
-                    Mesh3d(voxel.clone()),
-                    MeshMaterial3d(grass_voxel_mat.clone()),
-                    Transform::from_translation(Vec3::new(i as f32, -0.8, j as f32)),
-                ));
+    world.with_children(|parent| {
+
+        //Spawn a bunch of cubes.
+        for i in -30..30 {
+            world_voxels.push(Vec::new());
+            for j in -30..30 {
+                
+                let p_value = perlin.get([(i as f64 + 30.)/10. , (j as f64 + 30.)/10. ]);
+
+                if p_value < 0.0 {
+                    world_voxels[(i + 30) as usize].push(parent.spawn((
+                        WaterVoxel,
+                        Mesh3d(voxel.clone()),
+                        MeshMaterial3d(water_voxel_mat.clone()),
+                        Transform::from_translation(Vec3::new(i as f32, -1., j as f32)),
+                    )).id());
+                } else if p_value >= 0.0 && p_value < 0.15 {
+                    world_voxels[(i + 30) as usize].push(parent.spawn((
+                        SandVoxel,
+                        Mesh3d(voxel.clone()),
+                        MeshMaterial3d(sand_voxel_mat.clone()),
+                        Transform::from_translation(Vec3::new(i as f32, -0.85, j as f32)),
+                    )).id());
+                } else {
+                    world_voxels[(i + 30) as usize].push(parent.spawn((
+                        GrassVoxel,
+                        Mesh3d(voxel.clone()),
+                        MeshMaterial3d(grass_voxel_mat.clone()),
+                        Transform::from_translation(Vec3::new(i as f32, -0.8, j as f32)),
+                    )).id());
+                }
+            }
+        }
+    });
+
+    event_writer.send(VoxelsSpawnedEvent(world_voxels));
+}
+
+fn set_world_map(
+    mut event_reader: EventReader<VoxelsSpawnedEvent>,
+    mut event_writer: EventWriter<WorldMapDataSetEvent>,
+    mut world_query: Query<(Entity, &mut WorldMap)>,
+) {
+
+    for active_event in event_reader.read() {
+        match active_event {
+            VoxelsSpawnedEvent(world_voxels) => {
+                
+                println!("Event received 2!");
+                world_query.single_mut().1.map = world_voxels.clone();
+                println!("Event sending!");
+                event_writer.send(WorldMapDataSetEvent);
+                println!("Event se t!");
             }
         }
     }
-
-    event_writer.send(VoxelsSpawnedEvent);
 }
 
 fn generate_foliage(
@@ -128,7 +173,7 @@ fn generate_foliage(
 
     for active_event in events.read() {
         match active_event {
-            VoxelsSpawnedEvent => {
+            VoxelsSpawnedEvent(world_voxels) => {
                 
                 println!("Event received!");
 
@@ -142,14 +187,16 @@ fn generate_foliage(
                     ..default()
                 }));
 
-                for (_entity, transform) in grass_voxel_query.iter_mut() {
-                    if rand::random::<f32>() < 0.2 {
-                        commands.spawn((
-                            Foliage,
-                            foliage.clone(),
-                            foliage_mat.clone(),
-                            Transform::from_translation(transform.translation + Vec3::new(0.0, 0.75, 0.0)),
-                        ));
+                for (entity, transform) in grass_voxel_query.iter_mut() {
+                    if rand::random::<f32>() < 0.1 {
+                        commands.entity(entity).with_children(|parent| {
+                            parent.spawn((
+                                Foliage,
+                                foliage.clone(),
+                                foliage_mat.clone(),
+                                Transform::from_translation(Vec3::new(0.0, 0.75, 0.0)),
+                            ));
+                        });
                     }
                 }
             }
