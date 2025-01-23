@@ -10,7 +10,7 @@ pub(super) fn plugin(app: &mut App) {
 pub fn spawn_camera(mut commands: Commands) {
     commands.spawn((
             Camera3d::default(),
-            Transform::from_translation(Vec3::new(0.0, 25.0, -50.0))
+            Transform::from_translation(Vec3::new(0.0, 25.0, -50.0)).with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
         )
     );
 }
@@ -25,7 +25,8 @@ pub fn move_camera(
     for motion in mouse_motion.read() {
         let yaw = -motion.delta.x * 0.003;
         let pitch = -motion.delta.y * 0.002;
-        // Order of rotations is important, see <https://gamedev.stackexchange.com/a/136175/103059>
+
+        
         camera_transform.rotate_y(yaw);
         camera_transform.rotate_local_x(pitch);
     }

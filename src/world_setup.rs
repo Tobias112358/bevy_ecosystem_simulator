@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use rand::prelude::*;
+use noise::{NoiseFn, Perlin};
 
 pub(super) fn plugin(app: &mut App) {
     app
@@ -42,8 +42,6 @@ pub fn spawn_world(
         Transform::from_translation(Vec3::new(0.0, 10.0, 0.0)),
     ));
 
-    
-    let mut rng = rand::thread_rng();
 
     let voxel = meshes.add(Cuboid {
         half_size: Vec3::new(0.5,0.5,0.5),
@@ -60,26 +58,38 @@ pub fn spawn_world(
         ..default()
     });
 
+    let sand_voxel_mat = materials.add(StandardMaterial {
+        base_color: Color::linear_rgb(1.0, 1.0,0.6),
+        ..default()
+    });
+
+    let perlin = Perlin::new(5593487);
 
     //Spawn a bunch of cubes.
-    for i in -50..50 {
-        for j in -50..50 {
-            let r: f32 = rng.gen();
+    for i in -30..30 {
+        for j in -30..30 {
+            
+            let p_value = perlin.get([(i as f64 + 30.)/10. , (j as f64 + 30.)/10. ]);
 
-            if r < 0.3 {
+            if p_value < 0.0 {
                 commands.spawn((
                     Mesh3d(voxel.clone()),
                     MeshMaterial3d(water_voxel_mat.clone()),
-                    Transform::from_translation(Vec3::new(i as f32, -1.0, j as f32)),
+                    Transform::from_translation(Vec3::new(i as f32, -1., j as f32)),
+                ));
+            } else if p_value >= 0.0 && p_value < 0.15 {
+                commands.spawn((
+                    Mesh3d(voxel.clone()),
+                    MeshMaterial3d(sand_voxel_mat.clone()),
+                    Transform::from_translation(Vec3::new(i as f32, -0.85, j as f32)),
                 ));
             } else {
                 commands.spawn((
                     Mesh3d(voxel.clone()),
                     MeshMaterial3d(grass_voxel_mat.clone()),
-                    Transform::from_translation(Vec3::new(i as f32, -1.0, j as f32)),
+                    Transform::from_translation(Vec3::new(i as f32, -0.8, j as f32)),
                 ));
             }
-            
         }
     }
 }
