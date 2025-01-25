@@ -1,14 +1,16 @@
 use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
 
-#[derive(Component, PartialEq)]
+#[derive(Component, PartialEq, Clone)]
 pub enum Voxel {
     WaterVoxel,
     SandVoxel,
     GrassVoxel
 }
-#[derive(Component)]
-pub struct Foliage;
+#[derive(Component, Clone, Deref)]
+pub struct Foliage {
+    pub location: (i32, i32),
+}
 
 
 #[derive(Event)]
@@ -112,7 +114,7 @@ pub fn spawn_world(
                 
                 let p_value = perlin.get([(i as f64 + 30.)/10. , (j as f64 + 30.)/10. ]);
 
-                if p_value < 0.0 {
+                if p_value < -0.15 {
                     world_voxels[(i + 30) as usize].push(parent.spawn((
                         Voxel::WaterVoxel,
                         Mesh3d(voxel.clone()),
@@ -120,7 +122,7 @@ pub fn spawn_world(
                         Visibility::Visible,
                         Transform::from_translation(Vec3::new(i as f32, -1., j as f32)),
                     )).id());
-                } else if p_value >= 0.0 && p_value < 0.15 {
+                } else if p_value >= -0.15 && p_value < 0.05 {
                     world_voxels[(i + 30) as usize].push(parent.spawn((
                         Voxel::SandVoxel,
                         Mesh3d(voxel.clone()),
@@ -188,14 +190,16 @@ fn generate_foliage(
                     ..default()
                 }));
 
-                for (entity, _transform, voxel) in voxel_query.iter_mut() {
+                for (entity, transform, voxel) in voxel_query.iter_mut() {
                     if voxel != &Voxel::GrassVoxel {
                         continue;
                     }
                     if rand::random::<f32>() < 0.1 {
                         commands.entity(entity).with_children(|parent| {
                             parent.spawn((
-                                Foliage,
+                                Foliage {
+                                    location: ((transform.translation.x as i32) + 30, (transform.translation.z as i32) + 30),
+                                },
                                 foliage.clone(),
                                 foliage_mat.clone(),
                                 Transform::from_translation(Vec3::new(0.0, 0.75, 0.0)),
