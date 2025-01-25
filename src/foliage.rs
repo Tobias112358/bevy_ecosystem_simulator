@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::{
-    world_setup::{Voxel, VoxelsSpawnedEvent},
+    world_setup::{Voxel, VoxelType,  VoxelsSpawnedEvent},
     frame_manager::FrameControl
 };
 
@@ -47,7 +47,7 @@ fn initial_foliage_spawn(
                 }));
 
                 for (entity, transform, voxel) in voxel_query.iter_mut() {
-                    if voxel != &Voxel::GrassVoxel {
+                    if voxel.voxel_type != VoxelType::GrassVoxel {
                         continue;
                     }
                     if rand::random::<f32>() < 0.1 {
@@ -113,6 +113,5 @@ fn regenerate_foliage(
                 foliage.regen_counter += 1;
             }
         }
-        
     }
 }

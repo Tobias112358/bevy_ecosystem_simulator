@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::{
-    foliage::{Foliage, FoliageConsumedEvent}, frame_manager::FrameControl, world_setup::{Voxel, WorldMap, WorldMapDataSetEvent}
+    foliage::{Foliage, FoliageConsumedEvent}, frame_manager::FrameControl, world_setup::{Voxel, VoxelType, WorldMap, WorldMapDataSetEvent}
 };
 
 pub(super) fn plugin(app: &mut App) {
@@ -17,7 +17,7 @@ pub struct Rabbit {
     pub thirst: u32,
     pub location: (i32, i32),
     pub plants_in_range: Vec<Entity>,
-    pub water_in_range: Vec<Voxel>,
+    pub water_in_range: Vec<Entity>,
     pub sight_distance: u32,
 }
 
@@ -53,7 +53,7 @@ pub fn spawn_initial_rabbits(
                             continue;
                         };
 
-                        if current_voxel == &Voxel::GrassVoxel {
+                        if current_voxel.voxel_type == VoxelType::GrassVoxel {
                             break;
                         }
                     }
@@ -125,7 +125,7 @@ fn rabbit_movement(
                 for z in z_range.clone() {
 
                     if let Ok(current_voxel) = voxel_query.get(world_map.map[x as usize][z as usize]) {
-                        if current_voxel == &Voxel::GrassVoxel || current_voxel == &Voxel::SandVoxel {
+                        if current_voxel.voxel_type == VoxelType::GrassVoxel || current_voxel.voxel_type == VoxelType::SandVoxel {
                             possible_moves.push((x, z));
                         }
                     }
@@ -184,7 +184,45 @@ fn rabbit_movement(
                         
                     } else if rabbit.hunger > rabbit.thirst && rabbit.water_in_range.len() > 0 {
                         //Look for water
-                        walk_randomly(&mut rabbit, &mut transform, &possible_moves);
+                        println!("Looking for water");
+                        let mut x_direction = (std::i32::MAX-1) / 2;
+                        let mut z_direction = (std::i32::MAX-1) / 2;
+
+                        for voxel_entity in rabbit.water_in_range.clone() {
+                            let Ok(voxel) = voxel_query.get(voxel_entity) else {
+                                continue;
+                            };
+                            let x_direction_temp = voxel.location.0 - rabbit.location.0;
+                            let z_direction_temp = voxel.location.1 - rabbit.location.1;
+
+                            if x_direction_temp.abs() + z_direction_temp.abs() < x_direction.abs() + z_direction.abs() {
+                                x_direction = x_direction_temp;
+                                z_direction = z_direction_temp;
+                            }
+                        }
+
+                        if (x_direction.abs() == 1 && z_direction == 0) || (z_direction.abs() == 1 && x_direction == 0) {
+                            //despawn the plant and increase hunger
+                            
+                            println!("Drinking Water!");
+                            rabbit.thirst += 10;
+                        } else {
+                            if x_direction.abs() > z_direction.abs() {
+                                if x_direction > 0 {
+                                    rabbit.location.0 += 1;
+                                } else if x_direction < 0 {
+                                    rabbit.location.0 -= 1;
+                                }
+                                transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
+                            } else {
+                                if z_direction > 0 {
+                                    rabbit.location.1 += 1;
+                                } else if z_direction < 0 {
+                                    rabbit.location.1 -= 1;
+                                }
+                                transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
+                            }
+                        }
                     } else {
                         //Walk randomly.
                         walk_randomly(&mut rabbit, &mut transform, &possible_moves);
@@ -200,11 +238,11 @@ fn rabbit_movement(
                 rabbit.hunger -= 1;
             }
 
-            // if rabbit.thirst == 0 {
-            //     commands.entity(rabbit_entity).despawn();
-            // } else {
-            //     rabbit.thirst -= 1;
-            // }
+            if rabbit.thirst == 0 {
+                commands.entity(rabbit_entity).despawn();
+            } else {
+                rabbit.thirst -= 1;
+            }
 
             //Update the rabbit's nearby resources
             // binary search vector for the closest resources.
@@ -230,6 +268,7 @@ pub fn update_rabbit_nearby_resources(
     frame_control: Res<FrameControl>,
     mut rabbit_query: Query<&mut Rabbit>,
     foliage_query: Query<(Entity, &Foliage)>,
+    voxel_query: Query<(Entity, &Voxel)>
 ) {
     if frame_control.timer.finished() {
         
@@ -238,6 +277,7 @@ pub fn update_rabbit_nearby_resources(
             let rabbit_z = rabbit.location.1;
 
             rabbit.plants_in_range = Vec::new();
+            rabbit.water_in_range = Vec::new();
 
             for (i, (f_entity, foliage)) in foliage_query.iter().enumerate() {
                 if foliage.consumed {
@@ -256,6 +296,21 @@ pub fn update_rabbit_nearby_resources(
                 }
             }
             
+            for (j, (v_entity, voxel)) in voxel_query.iter().enumerate() {
+                if voxel.voxel_type == VoxelType::WaterVoxel {
+                    if (
+                        rabbit_x - (rabbit.sight_distance as i32) <= voxel.location.0 
+                        && rabbit_x + (rabbit.sight_distance as i32) >= voxel.location.0
+                    ) 
+                    && (
+                        rabbit_z - (rabbit.sight_distance as i32) <= voxel.location.1 
+                        && rabbit_z + (rabbit.sight_distance as i32) >= voxel.location.1
+                    ) {
+                        println!("vox{}: {:?}", j, voxel.location);
+                        rabbit.water_in_range.push(v_entity);
+                    }
+                }
+            }
         }
     }
     
@@ -265,7 +320,8 @@ pub fn update_rabbit_nearby_resources(
 pub fn debug_rabbit_info(
     frame_control: Res<FrameControl>,
     rabbit_query: Query<&Rabbit>,
-    foliage_query: Query<&Foliage>
+    foliage_query: Query<&Foliage>,
+    voxel_query: Query<&Voxel>,
 ) {
     if frame_control.timer.finished() {
         for rabbit in rabbit_query.iter() {
@@ -276,6 +332,13 @@ pub fn debug_rabbit_info(
                     continue;
                 };
                 println!("    Plant in range: {:?}", plant.location);
+            }
+            for voxel_entity in rabbit.water_in_range.iter() {
+                let Ok(voxel) = voxel_query.get(*voxel_entity) else {
+                    println!("    Warning: Water not found for entity: {:?}", voxel_entity);
+                    continue;
+                };
+                //println!("    Water Voxel in range: {:?}", voxel.location);
             }
         }
     }

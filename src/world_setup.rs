@@ -2,10 +2,16 @@ use bevy::prelude::*;
 use noise::{NoiseFn, Perlin};
 
 #[derive(Component, PartialEq, Clone)]
-pub enum Voxel {
+pub enum VoxelType {
     WaterVoxel,
     SandVoxel,
     GrassVoxel
+}
+
+#[derive(Component)]
+pub struct Voxel {
+    pub voxel_type: VoxelType,
+    pub location: (i32, i32),
 }
 
 #[derive(Event)]
@@ -111,7 +117,7 @@ pub fn spawn_world(
 
                 if p_value < -0.15 {
                     world_voxels[(i + 30) as usize].push(parent.spawn((
-                        Voxel::WaterVoxel,
+                        Voxel {voxel_type: VoxelType::WaterVoxel, location: (i + 30, j + 30)},
                         Mesh3d(voxel.clone()),
                         MeshMaterial3d(water_voxel_mat.clone()),
                         Visibility::Visible,
@@ -119,7 +125,7 @@ pub fn spawn_world(
                     )).id());
                 } else if p_value >= -0.15 && p_value < 0.05 {
                     world_voxels[(i + 30) as usize].push(parent.spawn((
-                        Voxel::SandVoxel,
+                        Voxel {voxel_type: VoxelType::SandVoxel, location: (i + 30, j + 30)},
                         Mesh3d(voxel.clone()),
                         MeshMaterial3d(sand_voxel_mat.clone()),
                         Visibility::Visible,
@@ -127,7 +133,7 @@ pub fn spawn_world(
                     )).id());
                 } else {
                     world_voxels[(i + 30) as usize].push(parent.spawn((
-                        Voxel::GrassVoxel,
+                        Voxel {voxel_type: VoxelType::GrassVoxel, location: (i + 30, j + 30)},
                         Mesh3d(voxel.clone()),
                         MeshMaterial3d(grass_voxel_mat.clone()),
                         Visibility::Visible,
