@@ -7,14 +7,9 @@ pub enum Voxel {
     SandVoxel,
     GrassVoxel
 }
-#[derive(Component, Clone, Deref)]
-pub struct Foliage {
-    pub location: (i32, i32),
-}
-
 
 #[derive(Event)]
-pub struct VoxelsSpawnedEvent(Vec<Vec<Entity>>);
+pub struct VoxelsSpawnedEvent(pub Vec<Vec<Entity>>);
 
 
 #[derive(Event)]
@@ -32,7 +27,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_event::<VoxelsSpawnedEvent>()
         .add_event::<WorldMapDataSetEvent>()
         .add_systems(Startup, spawn_world)
-        .add_systems(Update, (generate_foliage, set_world_map));
+        .add_systems(Update, set_world_map);
 }
 
 
@@ -161,52 +156,6 @@ fn set_world_map(
                 println!("Event sending!");
                 event_writer.send(WorldMapDataSetEvent);
                 println!("Event se t!");
-            }
-        }
-    }
-}
-
-fn generate_foliage(
-    mut commands: Commands,
-    mut events: EventReader<VoxelsSpawnedEvent>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut voxel_query: Query<(Entity, &Transform, &Voxel), With<Voxel>>,
-) {
-
-    for active_event in events.read() {
-        match active_event {
-            VoxelsSpawnedEvent(_world_voxels) => {
-                
-                println!("Event received!");
-
-                let foliage = Mesh3d(meshes.add(Cuboid {
-                    half_size: Vec3::new(0.1, 0.3, 0.1),
-                    ..default()
-                }));
-
-                let foliage_mat = MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::linear_rgb(0.1, 0.9,0.4),
-                    ..default()
-                }));
-
-                for (entity, transform, voxel) in voxel_query.iter_mut() {
-                    if voxel != &Voxel::GrassVoxel {
-                        continue;
-                    }
-                    if rand::random::<f32>() < 0.1 {
-                        commands.entity(entity).with_children(|parent| {
-                            parent.spawn((
-                                Foliage {
-                                    location: ((transform.translation.x as i32) + 30, (transform.translation.z as i32) + 30),
-                                },
-                                foliage.clone(),
-                                foliage_mat.clone(),
-                                Transform::from_translation(Vec3::new(0.0, 0.75, 0.0)),
-                            ));
-                        });
-                    }
-                }
             }
         }
     }

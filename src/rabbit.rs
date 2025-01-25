@@ -1,15 +1,12 @@
-use std::time::Duration;
-
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::world_setup::{Foliage, Voxel, WorldMap, WorldMapDataSetEvent};
+use crate::{
+    foliage::{Foliage, FoliageConsumedEvent}, frame_manager::FrameControl, world_setup::{Voxel, WorldMap, WorldMapDataSetEvent}
+};
 
 pub(super) fn plugin(app: &mut App) {
     app
-        .insert_resource(AnimalFrameControl {
-            timer: Timer::new(Duration::from_millis(90), TimerMode::Repeating),
-        })
         .add_systems(Update, (spawn_initial_rabbits, rabbit_movement, update_rabbit_nearby_resources, debug_rabbit_info));
 }
 
@@ -24,20 +21,16 @@ pub struct Rabbit {
     pub sight_distance: u32,
 }
 
-#[derive(Resource)]
-pub struct AnimalFrameControl {
-    pub timer: Timer,
-}
 
-const INITIAL_RABBIT_POPULATION: u32 = 10;
+const INITIAL_RABBIT_POPULATION: u32 = 8;
 
 pub fn spawn_initial_rabbits(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut events: EventReader<WorldMapDataSetEvent>,
-    mut world_map_query: Query<&WorldMap>,
-    mut voxel_query: Query<&Voxel>,
+    world_map_query: Query<&WorldMap>,
+    voxel_query: Query<&Voxel>,
 ) {
     for active_event in events.read() {
         match active_event {
@@ -47,10 +40,10 @@ pub fn spawn_initial_rabbits(
 
                     let mut rng = rand::thread_rng();
             
-                    let mut x: i32 = rng.gen_range(-30..30);
-                    let mut z: i32 = rng.gen_range(-30..30);
+                    let mut x: i32;
+                    let mut z: i32;
 
-                    while true {
+                    loop {
                         x = rng.gen_range(0..world_map.width);
                         z = rng.gen_range(0..world_map.height);
 
@@ -92,31 +85,24 @@ pub fn spawn_initial_rabbits(
             }
         }
     }
-
-    // commands.insert_resource(AnimalFrameControl {
-    //     // create the repeating timer
-    //     timer: Timer::new(Duration::from_secs(10), TimerMode::Repeating),
-    // })
-
     
 }
 
 
 fn rabbit_movement(
     mut commands: Commands,
-    time: Res<Time>,
-    mut frame_control: ResMut<AnimalFrameControl>,
+    frame_control: Res<FrameControl>,
     mut rabbit_query: Query<(Entity, &mut Rabbit, &mut Transform), With<Rabbit>>,
     voxel_query: Query<&Voxel>,
     foliage_query: Query<&Foliage>,
     world_map_query: Query<&WorldMap>,
+    mut event_writer: EventWriter<FoliageConsumedEvent>,
 ) {
 
-    frame_control.timer.tick(time.delta());
     if frame_control.timer.finished() {
         
 
-        let world_map = world_map_query.single() else {
+        let Ok(world_map) = world_map_query.get_single() else {
             panic!("Cannot find the world map!");
         };
         for (rabbit_entity, mut rabbit, mut transform) in rabbit_query.iter_mut() {
@@ -175,7 +161,7 @@ fn rabbit_movement(
                         if x_direction == 0 && z_direction == 0 {
                             //despawn the plant and increase hunger
                             
-                            commands.entity(closest_plant.unwrap()).despawn();
+                            event_writer.send(FoliageConsumedEvent(closest_plant.unwrap()));
                             rabbit.hunger += 10;
                         } else {
                             if x_direction.abs() > z_direction.abs() {
@@ -213,8 +199,12 @@ fn rabbit_movement(
             } else {
                 rabbit.hunger -= 1;
             }
-            
-            //rabbit.thirst -= 1;
+
+            // if rabbit.thirst == 0 {
+            //     commands.entity(rabbit_entity).despawn();
+            // } else {
+            //     rabbit.thirst -= 1;
+            // }
 
             //Update the rabbit's nearby resources
             // binary search vector for the closest resources.
@@ -237,7 +227,7 @@ fn walk_randomly(
 }
 
 pub fn update_rabbit_nearby_resources(
-    frame_control: ResMut<AnimalFrameControl>,
+    frame_control: Res<FrameControl>,
     mut rabbit_query: Query<&mut Rabbit>,
     foliage_query: Query<(Entity, &Foliage)>,
 ) {
@@ -250,6 +240,9 @@ pub fn update_rabbit_nearby_resources(
             rabbit.plants_in_range = Vec::new();
 
             for (i, (f_entity, foliage)) in foliage_query.iter().enumerate() {
+                if foliage.consumed {
+                    continue;
+                }
                 if (
                     rabbit_x - (rabbit.sight_distance as i32) <= foliage.location.0 
                     && rabbit_x + (rabbit.sight_distance as i32) >= foliage.location.0
@@ -270,7 +263,7 @@ pub fn update_rabbit_nearby_resources(
 
 
 pub fn debug_rabbit_info(
-    frame_control: ResMut<AnimalFrameControl>,
+    frame_control: Res<FrameControl>,
     rabbit_query: Query<&Rabbit>,
     foliage_query: Query<&Foliage>
 ) {
