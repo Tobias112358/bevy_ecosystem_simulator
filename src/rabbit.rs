@@ -21,12 +21,20 @@ pub struct Rabbit {
     pub location: (i32, i32),
     pub plants_in_range: Vec<Entity>,
     pub water_in_range: Vec<Entity>,
-    pub partner_in_range: Vec<(Entity, Rabbit)>,
+    pub partner_in_range: Vec<Entity>,
     pub sight_distance: u32,
     pub satisfaction_threshold: u32,
     pub full_threshold: u32,
     pub age: u32,
     pub mating_cooldown: u32,
+}
+
+pub enum RabbitPriorityMovement {
+    Partner,
+    Water,
+    Food,
+    Random,
+    None,
 }
 
 #[derive(Event)]
@@ -46,7 +54,7 @@ pub struct RabbitAgeLocalCounter {
 }
 
 
-const INITIAL_RABBIT_POPULATION: u32 = 10;
+const INITIAL_RABBIT_POPULATION: u32 = 12;
 
 pub fn spawn_initial_rabbits(
     mut commands: Commands,
@@ -97,18 +105,22 @@ pub fn spawn_initial_rabbits(
                         age: 0,
                         mating_cooldown: 0,
                     };
+
+                    let rand_r = rng.gen_range(0.5..1.0);
+                    let rand_g = rng.gen_range(0.3..0.6);
+                    let rand_b = rng.gen_range(0.15..0.3);
             
                     let rabbit_entity = commands.spawn((
                         rabbit,
                         Mesh3d(meshes.add(Cuboid {
-                            half_size: Vec3::new(0.25, 0.25, 0.25),
+                            half_size: Vec3::new(rng.gen_range(0.2..0.3), rng.gen_range(0.2..0.3), rng.gen_range(0.2..0.3)),
                             ..default()
                         })),
                         MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: Color::linear_rgb(0.625, 0.32, 0.1666),
+                            base_color: Color::linear_rgb(rand_r, rand_g, rand_b),
                             ..default()
                         })),
-                        Transform::from_translation(Vec3::new((x - 30) as f32, 0.375, (z - 30) as f32)),
+                        Transform::from_translation(Vec3::new((x - 30) as f32, -0.175, (z - 30) as f32)),
                         
                     )).id();
 
@@ -139,12 +151,21 @@ pub fn spawn_new_rabbit(
 
                 let baby_count = rng.gen_range(1..3);
 
-                if rabbit_resource.rabbits.len() as usize > 20 {
+                if rabbit_resource.rabbits.len() as usize > 200 {
                     println!("Rabbit population is at maximum capacity!");
                     continue;
                 }
 
+                println!("New rabbit!");
+
                 for _ in 0..baby_count {
+
+                    
+
+                    let rand_r = rng.gen_range(0.5..1.0);
+                    let rand_g = rng.gen_range(0.3..0.6);
+                    let rand_b = rng.gen_range(0.15..0.3);
+
                     let rabbit_entity = commands.spawn((
                         Rabbit {
                             id: rabbit1.id + rabbit2.id,
@@ -161,14 +182,14 @@ pub fn spawn_new_rabbit(
                             mating_cooldown: 0,
                         },
                         Mesh3d(meshes.add(Cuboid {
-                            half_size: Vec3::new(0.25, 0.25, 0.25),
+                            half_size: Vec3::new(rng.gen_range(0.2..0.3), rng.gen_range(0.2..0.3), rng.gen_range(0.2..0.3)),
                             ..default()
                         })),
                         MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color: Color::linear_rgb(0.625, 0.32, 0.1666),
+                            base_color: Color::linear_rgb(rand_r, rand_g, rand_b),
                             ..default()
                         })),
-                        Transform::from_translation(Vec3::new((rabbit1.location.0 - 30) as f32, 0.375, (rabbit2.location.1 - 30) as f32)),
+                        Transform::from_translation(Vec3::new((rabbit1.location.0 - 30) as f32, -0.175, (rabbit2.location.1 - 30) as f32)),
                         
                     )).id();
 
@@ -190,8 +211,8 @@ fn update_details_on_breeding(
             RabbitBreedingEvent(entity1, entity2) => {
                 let mut rabbits = rabbit_query.get_many_mut([*entity1, *entity2]).unwrap();
 
-                rabbits[0].mating_cooldown = 10;
-                rabbits[1].mating_cooldown = 10;
+                rabbits[0].mating_cooldown = 20;
+                rabbits[1].mating_cooldown = 20;
             }
         }
     }
@@ -203,6 +224,7 @@ fn rabbit_movement(
     mut commands: Commands,
     frame_control: Res<FrameControl>,
     mut rabbit_query: Query<(Entity, &mut Rabbit, &mut Transform), With<Rabbit>>,
+    //partner_query: Query<&Rabbit>,
     voxel_query: Query<&Voxel>,
     foliage_query: Query<&Foliage>,
     world_map_query: Query<&WorldMap>,
@@ -216,7 +238,10 @@ fn rabbit_movement(
         let Ok(world_map) = world_map_query.get_single() else {
             panic!("Cannot find the world map!");
         };
-        for (rabbit_entity, mut rabbit, mut transform) in rabbit_query.iter_mut() {
+
+        let mut rabbit_priority_vector: Vec<(Entity, RabbitPriorityMovement, i32, i32, Vec<(i32, i32)>)> = Vec::new();
+
+        for (rabbit_entity, rabbit, transform) in rabbit_query.iter() {
 
             let x_range = match rabbit.location.0 {
                 0 => [rabbit.location.0, (rabbit.location.0 + 1)],
@@ -243,16 +268,23 @@ fn rabbit_movement(
                 }
             }
 
+            let mut rabbit_priority_movement = RabbitPriorityMovement::None;
+            let mut x_direction = (std::i32::MAX-1) / 2;
+            let mut z_direction = (std::i32::MAX-1) / 2;
 
             if possible_moves.len() > 0 {
                 if rabbit.hunger >= rabbit.satisfaction_threshold && rabbit.thirst >= rabbit.satisfaction_threshold && rabbit.partner_in_range.len() > 0 && rabbit.age > 20 && rabbit.mating_cooldown == 0 {
                     //Look for partner
                     println!("Looking for partner");
-                    let mut x_direction = (std::i32::MAX-1) / 2;
-                    let mut z_direction = (std::i32::MAX-1) / 2;
+
+                    
 
                     let mut closest_partner: Option<Entity> = None;
-                    for (partner_entity, partner) in rabbit.partner_in_range.clone() {
+                    for partner_entity in rabbit.partner_in_range.clone() {
+
+                        let Ok((_, partner, _)) = rabbit_query.get(partner_entity) else {
+                            continue;
+                        };
 
                         //I need to get the partner's location
                         let x_direction_temp = partner.location.0 - rabbit.location.0;
@@ -265,10 +297,113 @@ fn rabbit_movement(
                         }
                     }
 
-                    if x_direction == 0 && z_direction == 0 {
+                    if (x_direction >= -1 && x_direction <= 1) && (z_direction >= -1 && z_direction <= 1) {
                         //spawn new rabbit
                         rabbit_breeding_event_writer.send(RabbitBreedingEvent(rabbit_entity, closest_partner.unwrap()));
                         
+                    } else {
+                        rabbit_priority_movement = RabbitPriorityMovement::Partner;
+                    }
+
+                    
+                } else if (rabbit.hunger >= rabbit.full_threshold && rabbit.thirst >= rabbit.full_threshold) || (rabbit.plants_in_range.len() == 0 && rabbit.water_in_range.len() == 0) {
+
+                    rabbit_priority_movement = RabbitPriorityMovement::Random;
+
+                } else if rabbit.hunger < rabbit.full_threshold || rabbit.thirst < rabbit.full_threshold {
+                    if rabbit.hunger <= rabbit.thirst && rabbit.plants_in_range.len() > 0 {
+                        //Look for food
+                        //println!("Looking for food");
+
+                        rabbit_priority_movement = RabbitPriorityMovement::Food;
+
+                        let mut closest_plant: Option<Entity> = None;
+                        for plant_entity in rabbit.plants_in_range.clone() {
+                            let Ok(plant) = foliage_query.get(plant_entity) else {
+                                continue;
+                            };
+                            let x_direction_temp = plant.location.0 - rabbit.location.0;
+                            let z_direction_temp = plant.location.1 - rabbit.location.1;
+
+                            if x_direction_temp.abs() + z_direction_temp.abs() < x_direction.abs() + z_direction.abs() { 
+                                x_direction = x_direction_temp;
+                                z_direction = z_direction_temp;
+                                closest_plant = Some(plant_entity);
+                            }
+                        }
+                        if x_direction == 0 && z_direction == 0 {
+                            event_writer.send(FoliageConsumedEvent(closest_plant.unwrap()));
+                        }
+                        
+                        
+                    } else if rabbit.hunger > rabbit.thirst && rabbit.water_in_range.len() > 0 {
+                        //Look for water
+                        //println!("Looking for water");
+
+                        for voxel_entity in rabbit.water_in_range.clone() {
+                            let Ok(voxel) = voxel_query.get(voxel_entity) else {
+                                continue;
+                            };
+                            let x_direction_temp = voxel.location.0 - rabbit.location.0;
+                            let z_direction_temp = voxel.location.1 - rabbit.location.1;
+
+                            if x_direction_temp.abs() + z_direction_temp.abs() < x_direction.abs() + z_direction.abs() {
+                                x_direction = x_direction_temp;
+                                z_direction = z_direction_temp;
+                            }
+                        }
+
+                        rabbit_priority_movement = RabbitPriorityMovement::Water;
+
+                        
+                    } else {
+                        //Walk randomly.
+                        rabbit_priority_movement = RabbitPriorityMovement::Random;
+                    }
+                }
+
+                
+            }
+
+            rabbit_priority_vector.push((rabbit_entity, rabbit_priority_movement, x_direction, z_direction, possible_moves));
+
+
+            //Update the rabbit's nearby resources
+            // binary search vector for the closest resources.
+
+        }
+
+        for (rabbit_entity, rabbit_priority_movement, x_direction, z_direction, possible_moves) in rabbit_priority_vector {
+            match rabbit_priority_movement {
+                RabbitPriorityMovement::Partner => {
+
+                    let (rabbit_entity, mut rabbit, mut transform) = rabbit_query.get_mut(rabbit_entity).unwrap();
+
+                    
+                    if x_direction.abs() > z_direction.abs() {
+                        if x_direction > 0 {
+                            rabbit.location.0 += 1;
+                        } else if x_direction < 0 {
+                            rabbit.location.0 -= 1;
+                        }
+                        transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
+                    } else {
+                        if z_direction > 0 {
+                            rabbit.location.1 += 1;
+                        } else if z_direction < 0 {
+                            rabbit.location.1 -= 1;
+                        }
+                        transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
+                    }
+                }
+                RabbitPriorityMovement::Food => {
+
+                    let (rabbit_entity, mut rabbit, mut transform) = rabbit_query.get_mut(rabbit_entity).unwrap();
+
+                    if x_direction == 0 && z_direction == 0 {
+                        //despawn the plant and increase hunger
+                        
+                        rabbit.hunger += 10;
                     } else {
                         if x_direction.abs() > z_direction.abs() {
                             if x_direction > 0 {
@@ -286,122 +421,67 @@ fn rabbit_movement(
                             transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
                         }
                     }
-                } else if (rabbit.hunger >= rabbit.full_threshold && rabbit.thirst >= rabbit.full_threshold) || (rabbit.plants_in_range.len() == 0 && rabbit.water_in_range.len() == 0) {
-                    walk_randomly(&mut rabbit, &mut transform, &possible_moves);
-                } else if rabbit.hunger < rabbit.full_threshold || rabbit.thirst < rabbit.full_threshold {
-                    if rabbit.hunger <= rabbit.thirst && rabbit.plants_in_range.len() > 0 {
-                        //Look for food
-                        //println!("Looking for food");
-                        let mut x_direction = (std::i32::MAX-1) / 2;
-                        let mut z_direction = (std::i32::MAX-1) / 2;
-
-                        let mut closest_plant: Option<Entity> = None;
-                        for plant_entity in rabbit.plants_in_range.clone() {
-                            let Ok(plant) = foliage_query.get(plant_entity) else {
-                                continue;
-                            };
-                            let x_direction_temp = plant.location.0 - rabbit.location.0;
-                            let z_direction_temp = plant.location.1 - rabbit.location.1;
-
-                            if x_direction_temp.abs() + z_direction_temp.abs() < x_direction.abs() + z_direction.abs() { 
-                                x_direction = x_direction_temp;
-                                z_direction = z_direction_temp;
-                                closest_plant = Some(plant_entity);
-                            }
-                        }
-
-                        if x_direction == 0 && z_direction == 0 {
-                            //despawn the plant and increase hunger
-                            
-                            event_writer.send(FoliageConsumedEvent(closest_plant.unwrap()));
-                            rabbit.hunger += 10;
-                        } else {
-                            if x_direction.abs() > z_direction.abs() {
-                                if x_direction > 0 {
-                                    rabbit.location.0 += 1;
-                                } else if x_direction < 0 {
-                                    rabbit.location.0 -= 1;
-                                }
-                                transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
-                            } else {
-                                if z_direction > 0 {
-                                    rabbit.location.1 += 1;
-                                } else if z_direction < 0 {
-                                    rabbit.location.1 -= 1;
-                                }
-                                transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
-                            }
-                        }
-
+                }
+                RabbitPriorityMovement::Water => {
+                    let (rabbit_entity, mut rabbit, mut transform) = rabbit_query.get_mut(rabbit_entity).unwrap();
+                    
+                    if (x_direction.abs() == 1 && z_direction == 0) || (z_direction.abs() == 1 && x_direction == 0) {
+                        //despawn the plant and increase hunger
                         
-                    } else if rabbit.hunger > rabbit.thirst && rabbit.water_in_range.len() > 0 {
-                        //Look for water
-                        //println!("Looking for water");
-                        let mut x_direction = (std::i32::MAX-1) / 2;
-                        let mut z_direction = (std::i32::MAX-1) / 2;
-
-                        for voxel_entity in rabbit.water_in_range.clone() {
-                            let Ok(voxel) = voxel_query.get(voxel_entity) else {
-                                continue;
-                            };
-                            let x_direction_temp = voxel.location.0 - rabbit.location.0;
-                            let z_direction_temp = voxel.location.1 - rabbit.location.1;
-
-                            if x_direction_temp.abs() + z_direction_temp.abs() < x_direction.abs() + z_direction.abs() {
-                                x_direction = x_direction_temp;
-                                z_direction = z_direction_temp;
-                            }
-                        }
-
-                        if (x_direction.abs() == 1 && z_direction == 0) || (z_direction.abs() == 1 && x_direction == 0) {
-                            //despawn the plant and increase hunger
-                            
-                            //println!("Drinking Water!");
-                            rabbit.thirst += 10;
-                        } else {
-                            if x_direction.abs() > z_direction.abs() {
-                                if x_direction > 0 {
-                                    rabbit.location.0 += 1;
-                                } else if x_direction < 0 {
-                                    rabbit.location.0 -= 1;
-                                }
-                                transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
-                            } else {
-                                if z_direction > 0 {
-                                    rabbit.location.1 += 1;
-                                } else if z_direction < 0 {
-                                    rabbit.location.1 -= 1;
-                                }
-                                transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
-                            }
-                        }
+                        //println!("Drinking Water!");
+                        rabbit.thirst += 10;
                     } else {
-                        //Walk randomly.
-                        walk_randomly(&mut rabbit, &mut transform, &possible_moves);
+                        if x_direction.abs() > z_direction.abs() {
+                            if x_direction > 0 {
+                                rabbit.location.0 += 1;
+                            } else if x_direction < 0 {
+                                rabbit.location.0 -= 1;
+                            }
+                            transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
+                        } else {
+                            if z_direction > 0 {
+                                rabbit.location.1 += 1;
+                            } else if z_direction < 0 {
+                                rabbit.location.1 -= 1;
+                            }
+                            transform.translation = Vec3::new((rabbit.location.0 - 30) as f32, 0.25, (rabbit.location.1 - 30) as f32);
+                        }
                     }
                 }
-                
+                RabbitPriorityMovement::Random => {
+                    //Walk randomly
+                    let (rabbit_entity, mut rabbit, mut transform) = rabbit_query.get_mut(rabbit_entity).unwrap();
+                    
+                    walk_randomly(&mut rabbit, &mut transform, &possible_moves);
+                    update_rabbit_hunger_and_thirst(&mut rabbit, rabbit_entity, &mut commands);
+                }
+                RabbitPriorityMovement::None => {
+                    //No priority movement
+                }
             }
-
-            //Update the rabbit's hunger and thirst
-            if rabbit.hunger == 0 {
-                commands.entity(rabbit_entity).despawn();
-            } else {
-                rabbit.hunger -= 1;
-            }
-
-            if rabbit.thirst == 0 {
-                commands.entity(rabbit_entity).despawn();
-            } else {
-                rabbit.thirst -= 1;
-            }
-
-            //Update the rabbit's nearby resources
-            // binary search vector for the closest resources.
-
         }
     }
 
+}
+
+fn update_rabbit_hunger_and_thirst(
+    rabbit: &mut Rabbit,
+    rabbit_entity: Entity,
+    commands: &mut Commands,
+) {
+    
+    //Update the rabbit's hunger and thirst
+    if rabbit.hunger == 0 {
+        commands.entity(rabbit_entity).despawn();
+    } else {
+        rabbit.hunger -= 1;
+    }
+
+    if rabbit.thirst == 0 {
+        commands.entity(rabbit_entity).despawn();
+    } else {
+        rabbit.thirst -= 1;
+    }
 }
 
     
@@ -496,7 +576,7 @@ fn update_rabbit_partner_list(
 ) {
 
     if frame_control.timer.finished() {
-        if rabbit_resource.rabbits.len() as usize > 20 {
+        if rabbit_resource.rabbits.len() as usize > 200 {
             return;
         }
 
@@ -510,12 +590,12 @@ fn update_rabbit_partner_list(
                 continue;
             }
     
-            println!("Updating partner list for rabbit: {:?}", rabbit_entity);
+            //println!("Updating partner list for rabbit: {:?}", rabbit_entity);
     
             let rabbit_x = rabbit.location.0;
             let rabbit_z = rabbit.location.1;
     
-            let mut available_rabbits: Vec<(Entity, Rabbit)> = Vec::new();
+            let mut available_rabbits: Vec<Entity> = Vec::new();
     
             for (partner_entity, partner) in rabbit_query.iter() {
                 if partner_entity == *rabbit_entity {
@@ -534,7 +614,7 @@ fn update_rabbit_partner_list(
                     && rabbit_z + (rabbit.sight_distance as i32) >= partner.location.1
                 ) {
                     //println!("rabbit {:?} for partner rabbit: {:?}", rabbit.location, partner.location);
-                    available_rabbits.push((partner_entity, partner.clone()));
+                    available_rabbits.push(partner_entity);
                 }
             }
     

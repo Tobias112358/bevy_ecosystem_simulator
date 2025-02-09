@@ -29,7 +29,7 @@ fn ui_example_system(
     egui::Window::new("Hello").show(contexts.ctx_mut(), |ui| {
         entity_query.iter().for_each(|(entity, rabbit)| {
             ui.label(format!("{:?}, {:?}", entity, rabbit.location));
-            for (partner_entity, partner) in rabbit.partner_in_range.iter() {
+            for partner_entity in rabbit.partner_in_range.iter() {
                 ui.label(format!("    {:?}", partner_entity));
             }
         });

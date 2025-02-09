@@ -105,7 +105,7 @@ fn regenerate_foliage(
 ) {
     if frame_control.timer.finished() {
         for (mut foliage, mut visibility) in foliage_query.iter_mut() {
-            if foliage.consumed && foliage.regen_counter > 20 {
+            if foliage.consumed && foliage.regen_counter > 50 {
                 foliage.consumed = false;
                 *visibility = Visibility::Visible;
                 foliage.regen_counter = 0;
