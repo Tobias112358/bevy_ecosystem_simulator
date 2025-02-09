@@ -8,7 +8,9 @@ use crate::{
 pub(super) fn plugin(app: &mut App) {
     app
         .add_event::<RabbitBreedingEvent>()
-        .add_systems(Update, (spawn_initial_rabbits, rabbit_movement, update_rabbit_nearby_resources, debug_rabbit_info, spawn_new_rabbit));
+        .add_event::<UpdateNearbyResourcesEvent>()
+        .insert_resource(RabbitResource { rabbits: Vec::new() })
+        .add_systems(Update, (spawn_initial_rabbits, rabbit_movement, update_rabbit_nearby_resources, spawn_new_rabbit,update_rabbit_partner_list, rabbit_age_tick, update_details_on_breeding));
 }
 
 #[derive(Component, Clone)]
@@ -23,13 +25,28 @@ pub struct Rabbit {
     pub sight_distance: u32,
     pub satisfaction_threshold: u32,
     pub full_threshold: u32,
+    pub age: u32,
+    pub mating_cooldown: u32,
 }
 
 #[derive(Event)]
 pub struct RabbitBreedingEvent(pub Entity, pub Entity);
 
+#[derive(Event)]
+pub struct UpdateNearbyResourcesEvent(pub Entity);
 
-const INITIAL_RABBIT_POPULATION: u32 = 8;
+#[derive(Resource)]
+pub struct RabbitResource {
+    pub rabbits: Vec<Entity>,
+}
+
+#[derive(Default)]
+pub struct RabbitAgeLocalCounter {
+    pub counter: u32,
+}
+
+
+const INITIAL_RABBIT_POPULATION: u32 = 10;
 
 pub fn spawn_initial_rabbits(
     mut commands: Commands,
@@ -38,6 +55,7 @@ pub fn spawn_initial_rabbits(
     mut events: EventReader<WorldMapDataSetEvent>,
     world_map_query: Query<&WorldMap>,
     voxel_query: Query<&Voxel>,
+    mut rabbit_resource: ResMut<RabbitResource>,
 ) {
     for active_event in events.read() {
         match active_event {
@@ -65,32 +83,36 @@ pub fn spawn_initial_rabbits(
                         }
                     }
             
+                    let rabbit = Rabbit {
+                        id: i,
+                        hunger: 50,
+                        thirst: 50,
+                        location: (x, z),
+                        plants_in_range: Vec::new(),
+                        water_in_range: Vec::new(),
+                        partner_in_range: Vec::new(),
+                        sight_distance: 3,
+                        satisfaction_threshold: 50,
+                        full_threshold: 70,
+                        age: 0,
+                        mating_cooldown: 0,
+                    };
             
-            
-                    commands.spawn((
-                        Rabbit {
-                            id: i,
-                            hunger: 50,
-                            thirst: 50,
-                            location: (x, z),
-                            plants_in_range: Vec::new(),
-                            water_in_range: Vec::new(),
-                            partner_in_range: Vec::new(),
-                            sight_distance: 3,
-                            satisfaction_threshold: 50,
-                            full_threshold: 70,
-                        },
+                    let rabbit_entity = commands.spawn((
+                        rabbit,
                         Mesh3d(meshes.add(Cuboid {
-                            half_size: Vec3::new(0.5, 0.5, 0.5),
+                            half_size: Vec3::new(0.25, 0.25, 0.25),
                             ..default()
                         })),
                         MeshMaterial3d(materials.add(StandardMaterial {
                             base_color: Color::linear_rgb(0.625, 0.32, 0.1666),
                             ..default()
                         })),
-                        Transform::from_translation(Vec3::new((x - 30) as f32, 0.25, (z - 30) as f32)),
+                        Transform::from_translation(Vec3::new((x - 30) as f32, 0.375, (z - 30) as f32)),
                         
-                    ));
+                    )).id();
+
+                    rabbit_resource.rabbits.push(rabbit_entity);
                 }
             }
         }
@@ -104,6 +126,7 @@ pub fn spawn_new_rabbit(
     rabbit_query: Query<&Rabbit>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut rabbit_resource: ResMut<RabbitResource>,
 ) {
 
     for active_event in events.read() {
@@ -116,8 +139,13 @@ pub fn spawn_new_rabbit(
 
                 let baby_count = rng.gen_range(1..3);
 
+                if rabbit_resource.rabbits.len() as usize > 20 {
+                    println!("Rabbit population is at maximum capacity!");
+                    continue;
+                }
+
                 for _ in 0..baby_count {
-                    commands.spawn((
+                    let rabbit_entity = commands.spawn((
                         Rabbit {
                             id: rabbit1.id + rabbit2.id,
                             hunger: 50,
@@ -129,24 +157,46 @@ pub fn spawn_new_rabbit(
                             sight_distance: 3,
                             satisfaction_threshold: 50,
                             full_threshold: 70,
+                            age: 0,
+                            mating_cooldown: 0,
                         },
                         Mesh3d(meshes.add(Cuboid {
-                            half_size: Vec3::new(0.5, 0.5, 0.5),
+                            half_size: Vec3::new(0.25, 0.25, 0.25),
                             ..default()
                         })),
                         MeshMaterial3d(materials.add(StandardMaterial {
                             base_color: Color::linear_rgb(0.625, 0.32, 0.1666),
                             ..default()
                         })),
-                        Transform::from_translation(Vec3::new((rabbit1.location.0 - 30) as f32, 0.25, (rabbit2.location.1 - 30) as f32)),
+                        Transform::from_translation(Vec3::new((rabbit1.location.0 - 30) as f32, 0.375, (rabbit2.location.1 - 30) as f32)),
                         
-                    ));
+                    )).id();
+
+                    rabbit_resource.rabbits.push(rabbit_entity);
                 }
                 
             }
         }
     }
 }
+
+fn update_details_on_breeding(
+    mut events: EventReader<RabbitBreedingEvent>,
+    mut rabbit_query: Query<&mut Rabbit>,
+) {
+
+    for active_event in events.read() {
+        match active_event {
+            RabbitBreedingEvent(entity1, entity2) => {
+                let mut rabbits = rabbit_query.get_many_mut([*entity1, *entity2]).unwrap();
+
+                rabbits[0].mating_cooldown = 10;
+                rabbits[1].mating_cooldown = 10;
+            }
+        }
+    }
+}
+
 
 
 fn rabbit_movement(
@@ -195,7 +245,7 @@ fn rabbit_movement(
 
 
             if possible_moves.len() > 0 {
-                if rabbit.hunger >= rabbit.satisfaction_threshold && rabbit.thirst >= rabbit.satisfaction_threshold && rabbit.partner_in_range.len() > 0 {
+                if rabbit.hunger >= rabbit.satisfaction_threshold && rabbit.thirst >= rabbit.satisfaction_threshold && rabbit.partner_in_range.len() > 0 && rabbit.age > 20 && rabbit.mating_cooldown == 0 {
                     //Look for partner
                     println!("Looking for partner");
                     let mut x_direction = (std::i32::MAX-1) / 2;
@@ -218,6 +268,7 @@ fn rabbit_movement(
                     if x_direction == 0 && z_direction == 0 {
                         //spawn new rabbit
                         rabbit_breeding_event_writer.send(RabbitBreedingEvent(rabbit_entity, closest_partner.unwrap()));
+                        
                     } else {
                         if x_direction.abs() > z_direction.abs() {
                             if x_direction > 0 {
@@ -237,10 +288,10 @@ fn rabbit_movement(
                     }
                 } else if (rabbit.hunger >= rabbit.full_threshold && rabbit.thirst >= rabbit.full_threshold) || (rabbit.plants_in_range.len() == 0 && rabbit.water_in_range.len() == 0) {
                     walk_randomly(&mut rabbit, &mut transform, &possible_moves);
-                } else if rabbit.hunger < rabbit.satisfaction_threshold || rabbit.thirst < rabbit.satisfaction_threshold {
+                } else if rabbit.hunger < rabbit.full_threshold || rabbit.thirst < rabbit.full_threshold {
                     if rabbit.hunger <= rabbit.thirst && rabbit.plants_in_range.len() > 0 {
                         //Look for food
-                        println!("Looking for food");
+                        //println!("Looking for food");
                         let mut x_direction = (std::i32::MAX-1) / 2;
                         let mut z_direction = (std::i32::MAX-1) / 2;
 
@@ -285,7 +336,7 @@ fn rabbit_movement(
                         
                     } else if rabbit.hunger > rabbit.thirst && rabbit.water_in_range.len() > 0 {
                         //Look for water
-                        println!("Looking for water");
+                        //println!("Looking for water");
                         let mut x_direction = (std::i32::MAX-1) / 2;
                         let mut z_direction = (std::i32::MAX-1) / 2;
 
@@ -305,7 +356,7 @@ fn rabbit_movement(
                         if (x_direction.abs() == 1 && z_direction == 0) || (z_direction.abs() == 1 && x_direction == 0) {
                             //despawn the plant and increase hunger
                             
-                            println!("Drinking Water!");
+                            //println!("Drinking Water!");
                             rabbit.thirst += 10;
                         } else {
                             if x_direction.abs() > z_direction.abs() {
@@ -369,11 +420,10 @@ pub fn update_rabbit_nearby_resources(
     frame_control: Res<FrameControl>,
     mut rabbit_query: Query<(Entity, &mut Rabbit)>,
     foliage_query: Query<(Entity, &Foliage)>,
-    voxel_query: Query<(Entity, &Voxel)>
+    voxel_query: Query<(Entity, &Voxel)>,
+    mut event_writer: EventWriter<UpdateNearbyResourcesEvent>,
 ) {
     if frame_control.timer.finished() {
-
-        let mut available_rabbits: Vec<(Entity, Rabbit)> = Vec::new();
         
         for (rabbit_entity, mut rabbit) in rabbit_query.iter_mut() {
             let rabbit_x = rabbit.location.0;
@@ -381,7 +431,6 @@ pub fn update_rabbit_nearby_resources(
 
             rabbit.plants_in_range = Vec::new();
             rabbit.water_in_range = Vec::new();
-            rabbit.partner_in_range = Vec::new();
 
             for (i, (f_entity, foliage)) in foliage_query.iter().enumerate() {
                 if foliage.consumed {
@@ -395,7 +444,7 @@ pub fn update_rabbit_nearby_resources(
                     rabbit_z - (rabbit.sight_distance as i32) <= foliage.location.1 
                     && rabbit_z + (rabbit.sight_distance as i32) >= foliage.location.1
                 ) {
-                    println!("fol{}: {:?}", i, foliage.location);
+                    //println!("fol{}: {:?}", i, foliage.location);
                     rabbit.plants_in_range.push(f_entity);
                 }
             }
@@ -410,14 +459,72 @@ pub fn update_rabbit_nearby_resources(
                         rabbit_z - (rabbit.sight_distance as i32) <= voxel.location.1 
                         && rabbit_z + (rabbit.sight_distance as i32) >= voxel.location.1
                     ) {
-                        println!("vox{}: {:?}", j, voxel.location);
+                        //println!("vox{}: {:?}", j, voxel.location);
                         rabbit.water_in_range.push(v_entity);
                     }
                 }
             }
 
             // I need to figure out a way to query all other rabbits in a scene for this scenario.
-            for (i, (r_entity, partner)) in available_rabbits.clone().into_iter().enumerate() {
+            if rabbit.age > 20 {
+                //event_writer.send(UpdateNearbyResourcesEvent(rabbit_entity));
+            }
+
+
+            // for (i, (r_entity, partner)) in available_rabbits.clone().into_iter().enumerate() {
+            //     if (
+            //         rabbit_x - (rabbit.sight_distance as i32) <= partner.location.0 
+            //         && rabbit_x + (rabbit.sight_distance as i32) >= partner.location.0
+            //     ) 
+            //     && (
+            //         rabbit_z - (rabbit.sight_distance as i32) <= partner.location.1 
+            //         && rabbit_z + (rabbit.sight_distance as i32) >= partner.location.1
+            //     ) {
+            //         //println!("rabbit{}: {:?}", i, partner.location);
+            //         rabbit.partner_in_range.push((r_entity, partner.clone()));
+            //     }
+            // }
+        }
+    }
+}
+
+fn update_rabbit_partner_list(
+    frame_control: Res<FrameControl>,
+    mut rabbit_resource: ResMut<RabbitResource>,
+    mut rabbit_query: Query<(Entity, &mut Rabbit)>,
+    mut events: EventReader<UpdateNearbyResourcesEvent>,
+) {
+
+    if frame_control.timer.finished() {
+        if rabbit_resource.rabbits.len() as usize > 20 {
+            return;
+        }
+
+        for rabbit_entity in rabbit_resource.rabbits.iter_mut() {
+
+            let Ok((_, rabbit)) = rabbit_query.get(*rabbit_entity) else {
+                continue;
+            };
+    
+            if rabbit.age < 20 {
+                continue;
+            }
+    
+            println!("Updating partner list for rabbit: {:?}", rabbit_entity);
+    
+            let rabbit_x = rabbit.location.0;
+            let rabbit_z = rabbit.location.1;
+    
+            let mut available_rabbits: Vec<(Entity, Rabbit)> = Vec::new();
+    
+            for (partner_entity, partner) in rabbit_query.iter() {
+                if partner_entity == *rabbit_entity {
+                    continue;
+                }
+                if partner.age < 20 || partner.mating_cooldown > 0 {
+                    continue;
+                }
+    
                 if (
                     rabbit_x - (rabbit.sight_distance as i32) <= partner.location.0 
                     && rabbit_x + (rabbit.sight_distance as i32) >= partner.location.0
@@ -426,38 +533,51 @@ pub fn update_rabbit_nearby_resources(
                     rabbit_z - (rabbit.sight_distance as i32) <= partner.location.1 
                     && rabbit_z + (rabbit.sight_distance as i32) >= partner.location.1
                 ) {
-                    println!("rabbit{}: {:?}", i, partner.location);
-                    rabbit.partner_in_range.push((r_entity, partner.clone()));
+                    //println!("rabbit {:?} for partner rabbit: {:?}", rabbit.location, partner.location);
+                    available_rabbits.push((partner_entity, partner.clone()));
                 }
             }
+    
+            let Ok((_, mut rabbit)) = rabbit_query.get_mut(*rabbit_entity) else {
+                continue;
+            };
+    
+            rabbit.partner_in_range = available_rabbits;
         }
     }
 }
 
 
-pub fn debug_rabbit_info(
+fn rabbit_age_tick(
+    mut commands: Commands,
     frame_control: Res<FrameControl>,
-    rabbit_query: Query<&Rabbit>,
-    foliage_query: Query<&Foliage>,
-    voxel_query: Query<&Voxel>,
+    mut rabbit_resource: ResMut<RabbitResource>,
+    mut rabbit_query: Query<(Entity, &mut Rabbit)>,
+    mut local_counter: Local<RabbitAgeLocalCounter>,
 ) {
     if frame_control.timer.finished() {
-        for rabbit in rabbit_query.iter() {
-            println!("Rabbit: {}, Hunger: {}, Thirst: {}, Location: {:?}", rabbit.id, rabbit.hunger, rabbit.thirst, rabbit.location);
-            for plant_entity in rabbit.plants_in_range.iter() {
-                let Ok(plant) = foliage_query.get(*plant_entity) else {
-                    println!("    Warning: Plant not found for entity: {:?}", plant_entity);
-                    continue;
-                };
-                println!("    Plant in range: {:?}", plant.location);
+        local_counter.counter += 1;
+        if local_counter.counter >= 5 {
+            for (entity, mut rabbit) in rabbit_query.iter_mut() {
+                rabbit.age += 1;
+                if rabbit.mating_cooldown > 0 {
+                    rabbit.mating_cooldown -= 1;
+                }
+                if rabbit.age >= 50 {
+                    let mut rng = rand::thread_rng();
+                    if rabbit.age < 100 {
+                        let random_number = rng.gen_range(0..(100 - rabbit.age));
+                        if random_number == 0 {
+                            rabbit_resource.rabbits.retain(|&x| x != entity);
+                            commands.entity(entity).despawn();
+                        }
+                    } else {
+                        rabbit_resource.rabbits.retain(|&x| x != entity);
+                        commands.entity(entity).despawn();
+                    }
+                }
             }
-            for voxel_entity in rabbit.water_in_range.iter() {
-                let Ok(voxel) = voxel_query.get(*voxel_entity) else {
-                    println!("    Warning: Water not found for entity: {:?}", voxel_entity);
-                    continue;
-                };
-                println!("    Water Voxel in range: {:?}", voxel.location);
-            }
+            local_counter.counter = 0;
         }
     }
 }

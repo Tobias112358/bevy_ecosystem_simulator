@@ -10,7 +10,7 @@ pub struct FrameControl {
 pub(super) fn plugin(app: &mut App) {
     app
         .insert_resource(FrameControl {
-            timer: Timer::new(Duration::from_millis(60), TimerMode::Repeating),
+            timer: Timer::new(Duration::from_millis(50), TimerMode::Repeating),
         })
         .add_systems(Update, frame_control_tick);
 }
